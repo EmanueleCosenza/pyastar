@@ -39,7 +39,7 @@ inline float l1_norm(int i0, int j0, int i1, int j1) {
 
 // weights:        flattened h x w grid of costs
 // h, w:           height and width of grid
-// start, goal:    index of start/goal in flattened grid
+// start, goals:    indexes of start/goals in flattened grid
 // diag_ok:        if true, allows diagonal moves (8-conn.)
 // paths (output): for each node, stores previous node in path
 //extern "C" bool astar(
@@ -48,18 +48,21 @@ static PyObject *astar(PyObject *self, PyObject *args) {
   int h;
   int w;
   int start;
-  int goal;
+  const PyArrayObject* goals_object;
+  int n_goals;
   int diag_ok;
 
   if (!PyArg_ParseTuple(
-        args, "Oiiiii", // i = int, O = object
+        args, "OiiiOii", // i = int, O = object
         &weights_object,
         &h, &w,
-        &start, &goal,
+        &start, &goals_object,
+        &n_goals,
         &diag_ok))
     return NULL;
 
   float* weights = (float*) weights_object->data;
+  int* goals = (int*) goals_object->data;
   int* paths = new int[h * w];
   int path_length = -1;
 
@@ -74,12 +77,22 @@ static PyObject *astar(PyObject *self, PyObject *args) {
   nodes_to_visit.push(start_node);
 
   int* nbrs = new int[8];
+  int found_goal;
 
   while (!nodes_to_visit.empty()) {
     // .top() doesn't actually remove the node
     Node cur = nodes_to_visit.top();
 
-    if (cur.idx == goal) {
+    // Check if goal node has been reached
+    int found = 0;
+    for (int i = 0; i < n_goals; i++) {
+        if (cur.idx == goals[i]) {
+            found = 1;
+            found_goal = goals[i];
+            break;
+        }
+    }
+    if (found) {
       path_length = cur.path_length;
       break;
     }
@@ -98,20 +111,28 @@ static PyObject *astar(PyObject *self, PyObject *args) {
     nbrs[6] = (row + 1 < h)                            ? cur.idx + w       : -1;
     nbrs[7] = (diag_ok && row + 1 < h && col + 1 < w ) ? cur.idx + w + 1   : -1;
 
-    float heuristic_cost;
     for (int i = 0; i < 8; ++i) {
       if (nbrs[i] >= 0) {
         // the sum of the cost so far and the cost of this move
         float new_cost = costs[cur.idx] + weights[nbrs[i]];
         if (new_cost < costs[nbrs[i]]) {
-          // estimate the cost to the goal based on legal moves
+          float dist_to_goal;
+          float heuristic_cost = INF;
+          // estimate the cost to the goals based on legal moves
           if (diag_ok) {
-            heuristic_cost = linf_norm(nbrs[i] / w, nbrs[i] % w,
-                                       goal    / w, goal    % w);
+            for (int j = 0; j < n_goals; j++) {
+              dist_to_goal = linf_norm(nbrs[i] / w, nbrs[i] % w,
+                                       goals[j]    / w, goals[j]    % w);
+              if (dist_to_goal < heuristic_cost) heuristic_cost = dist_to_goal;
+            }
           }
           else {
-            heuristic_cost = l1_norm(nbrs[i] / w, nbrs[i] % w,
-                                     goal    / w, goal    % w);
+            for (int j = 0; j < n_goals; j++) {
+              dist_to_goal = l1_norm(nbrs[i] / w, nbrs[i] % w,
+                                     goals[j]    / w, goals[j]    % w);
+              if (dist_to_goal < heuristic_cost) heuristic_cost = dist_to_goal;
+            }
+
           }
 
           // paths with lower expected cost are explored first
@@ -130,7 +151,7 @@ static PyObject *astar(PyObject *self, PyObject *args) {
     npy_intp dims[2] = {path_length, 2};
     PyArrayObject* path = (PyArrayObject*) PyArray_SimpleNew(2, dims, NPY_INT32);
     npy_int32 *iptr, *jptr;
-    int idx = goal;
+    int idx = found_goal;
     for (npy_intp i = dims[0] - 1; i >= 0; --i) {
         iptr = (npy_int32*) (path->data + i * path->strides[0]);
         jptr = (npy_int32*) (path->data + i * path->strides[0] + path->strides[1]);

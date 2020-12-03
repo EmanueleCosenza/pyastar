@@ -1,7 +1,7 @@
 import ctypes
 import numpy as np
 import pyastar.astar
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 
 
 # Define array types
@@ -27,7 +27,7 @@ pyastar.astar.argtypes = [
 def astar_path(
         weights: np.ndarray,
         start: Tuple[int, int],
-        goal: Tuple[int, int],
+        goals: List[Tuple[int, int]],
         allow_diagonal: bool = False) -> Union[np.ndarray, None]:
     # For the heuristic to be valid, each move must cost at least 1.
     if weights.min(axis=None) < 1.:
@@ -37,16 +37,19 @@ def astar_path(
     if (start[0] < 0 or start[0] >= weights.shape[0] or
             start[1] < 0 or start[1] >= weights.shape[1]):
         raise ValueError(f"Start of {start} lies outside grid.")
-    # Ensure goal is within bounds.
-    if (goal[0] < 0 or goal[0] >= weights.shape[0] or
-            goal[1] < 0 or goal[1] >= weights.shape[1]):
-        raise ValueError(f"Goal of {goal} lies outside grid.")
+    # Ensure goals are within bounds.
+    for goal in goals:
+        if (goal[0] < 0 or goal[0] >= weights.shape[0] or
+                goal[1] < 0 or goal[1] >= weights.shape[1]):
+            raise ValueError(f"Goal of {goal} lies outside grid.")
 
     height, width = weights.shape
+    # Build indexes on flattened weights
     start_idx = np.ravel_multi_index(start, (height, width))
-    goal_idx = np.ravel_multi_index(goal, (height, width))
+    goals = [[i[0] for i in goals], [i[1] for i in goals]]
+    goals_idxs = np.ravel_multi_index(goals, (height, width))
 
     path = pyastar.astar.astar(
-        weights.flatten(), height, width, start_idx, goal_idx, allow_diagonal,
+        weights.flatten(), height, width, start_idx, goals_idxs.astype(np.int32), goals_idxs.shape[0], allow_diagonal,
     )
     return path
